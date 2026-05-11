@@ -24,4 +24,5 @@ def find_show_by_keyword(df: pd.DataFrame, keyword: str, context_chars: int = 10
     results['overview_snippet'] = results['overview_raw'].apply(
         lambda x: highlight_context(x, keyword_lower, context_chars)
     )
-    return results[['name', 'overview_snippet', 'vote_average', 'vote_count']], None
+    # Kolom yang akan digunakan di UI
+    return results[['name', 'overview_snippet', 'overview_raw', 'vote_average', 'vote_count']], None
