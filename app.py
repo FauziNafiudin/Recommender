@@ -38,14 +38,12 @@ if "show_name" not in st.session_state:
 # Pencarian keyword
 if "kw_results_raw" not in st.session_state:
     st.session_state.kw_results_raw = None
-if "kw_current_page" not in st.session_state:
-    st.session_state.kw_current_page = 1
+if "kw_display_count" not in st.session_state:
+    st.session_state.kw_display_count = 10
 if "kw_sort_metric" not in st.session_state:
     st.session_state.kw_sort_metric = "rating"
 if "kw_last_search" not in st.session_state:
     st.session_state.kw_last_search = ""
-
-ITEMS_PER_PAGE = 10
 
 # ----------------------------------------------
 # UI
@@ -176,10 +174,10 @@ else:
         "Masukkan kata kunci", placeholder="contoh: lawyer, space, family", key="search_kw"
     )
 
-    # Reset halaman ke 1 kalau keyword berubah
+    # Reset kalau keyword berubah
     if search_kw != st.session_state.kw_last_search:
         st.session_state.kw_last_search = search_kw
-        st.session_state.kw_current_page = 1
+        st.session_state.kw_display_count = 10
         st.session_state.kw_sort_metric = "rating"
         if search_kw:
             raw, error = find_show_by_keyword(df, search_kw)
@@ -197,7 +195,6 @@ else:
     if st.session_state.kw_results_raw is not None:
         data = st.session_state.kw_results_raw
         total = len(data)
-        total_pages = max(1, -(-total // ITEMS_PER_PAGE))  # ceiling division
 
         # --- Sorting ---
         st.write("**Urutkan berdasarkan:**")
@@ -210,7 +207,7 @@ else:
                 type="primary" if st.session_state.kw_sort_metric == "rating" else "secondary",
             ):
                 st.session_state.kw_sort_metric = "rating"
-                st.session_state.kw_current_page = 1
+                st.session_state.kw_display_count = 10
                 st.rerun()
         with c2:
             if st.button(
@@ -220,7 +217,7 @@ else:
                 type="primary" if st.session_state.kw_sort_metric == "popularity" else "secondary",
             ):
                 st.session_state.kw_sort_metric = "popularity"
-                st.session_state.kw_current_page = 1
+                st.session_state.kw_display_count = 10
                 st.rerun()
 
         sorted_data = data.sort_values(
@@ -228,15 +225,12 @@ else:
             ascending=False,
         )
 
-        # Potong sesuai halaman
-        current_page = st.session_state.kw_current_page
-        start_idx = (current_page - 1) * ITEMS_PER_PAGE
-        end_idx = start_idx + ITEMS_PER_PAGE
-        page_data = sorted_data.iloc[start_idx:end_idx]
+        # Ambil sebanyak display_count (max = total)
+        display_count = min(st.session_state.kw_display_count, total)
+        page_data = sorted_data.iloc[:display_count]
 
         st.success(
-            f"Ditemukan **{total}** show yang mengandung kata *'{search_kw}'* "
-            f"— Halaman **{current_page}** dari **{total_pages}**"
+            f"Ditemukan **{total}** show — menampilkan **{display_count}** teratas"
         )
 
         # --- Hasil ---
@@ -253,39 +247,14 @@ else:
                         st.write(row["overview_raw"])
                 st.divider()
 
-        # --- Pagination ala Google ---
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Tombol prev + input halaman + tombol next dalam satu baris
-        col_prev, col_page, col_next = st.columns([1, 2, 1])
-
-        with col_prev:
-            if current_page > 1:
-                if st.button("◀ Previous", use_container_width=True):
-                    st.session_state.kw_current_page -= 1
-                    st.rerun()
-            else:
-                # Placeholder kosong supaya layout tidak geser
-                st.markdown("")
-
-        with col_page:
-            # Input angka halaman di tengah
-            new_page = st.number_input(
-                f"Halaman (dari {total_pages})",
-                min_value=1,
-                max_value=total_pages,
-                value=current_page,
-                step=1,
-                key="page_input",
-            )
-            if new_page != current_page:
-                st.session_state.kw_current_page = int(new_page)
+        # --- Load More (hanya muncul kalau masih ada sisa) ---
+        if display_count < total:
+            remaining = total - display_count
+            if st.button(
+                f"📥 Tampilkan 10 lagi ({remaining} tersisa)",
+                use_container_width=True,
+            ):
+                st.session_state.kw_display_count += 10
                 st.rerun()
-
-        with col_next:
-            if current_page < total_pages:
-                if st.button("Next ▶", use_container_width=True):
-                    st.session_state.kw_current_page += 1
-                    st.rerun()
-            else:
-                st.markdown("")
+        else:
+            st.info("✅ Semua hasil sudah ditampilkan.")
