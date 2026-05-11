@@ -1,9 +1,10 @@
 import pandas as pd
 
-def find_show_by_keyword(df: pd.DataFrame, keyword: str, context_chars: int = 100):
+def find_show_by_keyword(df: pd.DataFrame, keyword: str, context_chars: int = 100) -> tuple:
     keyword_lower = keyword.lower()
     mask = df['overview_raw'].str.lower().str.contains(keyword_lower, na=False)
     results = df[mask].copy()
+
     if results.empty:
         return None, f"Kata '{keyword}' tidak ditemukan di overview manapun."
 
