@@ -29,19 +29,19 @@ if "active_tab" not in st.session_state:
 
 # Rekomendasi
 if "sort_metric" not in st.session_state:
-    st.session_state.sort_metric = "similarity"   # default Similarity Score
+    st.session_state.sort_metric = "similarity"
 if "recommendations" not in st.session_state:
     st.session_state.recommendations = None
 if "show_name" not in st.session_state:
     st.session_state.show_name = ""
 
 # Pencarian keyword
-if "kw_results" not in st.session_state:
-    st.session_state.kw_results = None
-if "kw_page" not in st.session_state:
-    st.session_state.kw_page = 1
+if "kw_results_raw" not in st.session_state:
+    st.session_state.kw_results_raw = None
+if "kw_display_count" not in st.session_state:
+    st.session_state.kw_display_count = 10
 if "kw_sort_metric" not in st.session_state:
-    st.session_state.kw_sort_metric = "rating"    # default Rating
+    st.session_state.kw_sort_metric = "rating"
 
 # ----------------------------------------------
 # UI
@@ -129,8 +129,8 @@ if st.session_state.active_tab == "rekomendasi":
         st.success(f"✅ Top {len(recs)} rekomendasi untuk *{show_name}*")
 
         st.write("**Urutkan berdasarkan:**")
-        # Urutan baru: Rating - Similarity - Popularity
         cols_btn = st.columns(3)
+        # Urutan: Rating - Similarity Score - Popularity
         metrics = [
             ("rating", "Rating"),
             ("similarity", "Similarity Score"),
@@ -174,20 +174,22 @@ else:
     )
 
     if search_kw:
-        # Cari dan simpan di session_state
-        results, error = find_show_by_keyword(df, search_kw)
+        # Cari dan simpan data mentah
+        raw, error = find_show_by_keyword(df, search_kw)
         if error:
             st.warning(error)
-            st.session_state.kw_results = None
+            st.session_state.kw_results_raw = None
+            st.session_state.kw_display_count = 10
         else:
-            results = results.copy()
-            results["popularity"] = results["vote_average"] * results["vote_count"]
-            st.session_state.kw_results = results
-            st.session_state.kw_page = 1  # reset halaman saat pencarian baru
+            raw = raw.copy()
+            raw["popularity"] = raw["vote_average"] * raw["vote_count"]
+            st.session_state.kw_results_raw = raw
+            st.session_state.kw_display_count = 10   # reset ke 10 item
+            st.session_state.kw_sort_metric = "rating"
 
-    # Tampilkan hasil jika ada
-    if st.session_state.kw_results is not None:
-        data = st.session_state.kw_results
+    # Tampilkan hasil jika ada data mentah
+    if st.session_state.kw_results_raw is not None:
+        data = st.session_state.kw_results_raw
         total = len(data)
 
         # Sorting (dua tombol seimbang)
@@ -201,6 +203,7 @@ else:
                 type="primary" if st.session_state.kw_sort_metric == "rating" else "secondary",
             ):
                 st.session_state.kw_sort_metric = "rating"
+                st.session_state.kw_display_count = 10
                 st.rerun()
         with c2:
             if st.button(
@@ -210,29 +213,18 @@ else:
                 type="primary" if st.session_state.kw_sort_metric == "popularity" else "secondary",
             ):
                 st.session_state.kw_sort_metric = "popularity"
+                st.session_state.kw_display_count = 10
                 st.rerun()
 
-        # Terapkan sorting
-        if st.session_state.kw_sort_metric == "rating":
-            data = data.sort_values("vote_average", ascending=False)
-        else:
-            data = data.sort_values("popularity", ascending=False)
+        # Urutkan data sesuai metrik
+        sorted_data = data.sort_values(
+            by="vote_average" if st.session_state.kw_sort_metric == "rating" else "popularity",
+            ascending=False,
+        )
 
-        per_page = 10
-        max_page = max(1, (total - 1) // per_page + 1)
-        page = st.session_state.kw_page
-
-        # Validasi halaman
-        if page < 1:
-            page = 1
-            st.session_state.kw_page = 1
-        elif page > max_page:
-            page = max_page
-            st.session_state.kw_page = max_page
-
-        start_idx = (page - 1) * per_page
-        end_idx = min(start_idx + per_page, total)
-        page_data = data.iloc[start_idx:end_idx]
+        # Potong sesuai display_count
+        display_count = min(st.session_state.kw_display_count, total)
+        page_data = sorted_data.iloc[:display_count]
 
         st.success(f"Ditemukan **{total}** show yang mengandung kata *'{search_kw}'*")
 
@@ -249,40 +241,25 @@ else:
                         st.write(row["overview_raw"])
                 st.divider()
 
-        # ---------------------------
-        # Navigasi halaman (berfungsi)
-        # ---------------------------
-        if max_page > 1:
-            col_prev, col_mid, col_next = st.columns([1, 2, 1])
-
-            with col_prev:
-                if page > 1:
-                    if st.button("← Previous", use_container_width=True):
-                        st.session_state.kw_page = page - 1
-                        st.rerun()
-
-            with col_mid:
-                # Form untuk lompat halaman (tidak memicu rerun saat mengetik)
-                with st.form("jump_page_form", clear_on_submit=True):
-                    new_page = st.number_input(
-                        "Halaman",
-                        min_value=1,
-                        max_value=max_page,
-                        value=page,
-                        step=1,
-                    )
-                    submitted = st.form_submit_button("Go")
-                    if submitted:
-                        st.session_state.kw_page = int(new_page)
-                        st.rerun()
-
-                st.markdown(
-                    f"<div style='text-align:center;'>dari {max_page}</div>",
-                    unsafe_allow_html=True,
+        # --- Load More + input lompat ---
+        if display_count < total:
+            col_load, col_jump = st.columns([3, 1])
+            with col_load:
+                if st.button("📥 Tampilkan lebih banyak…", use_container_width=True):
+                    st.session_state.kw_display_count = min(st.session_state.kw_display_count + 10, total)
+                    st.rerun()
+            with col_jump:
+                # Input manual untuk langsung ke jumlah item tertentu
+                jump_to = st.number_input(
+                    "Lompat ke",
+                    min_value=1,
+                    max_value=total,
+                    value=display_count,
+                    step=10,
+                    label_visibility="collapsed",
                 )
-
-            with col_next:
-                if page < max_page:
-                    if st.button("Next →", use_container_width=True):
-                        st.session_state.kw_page = page + 1
-                        st.rerun()
+                if st.button("Terapkan"):
+                    st.session_state.kw_display_count = min(int(jump_to), total)
+                    st.rerun()
+        else:
+            st.info("✅ Semua hasil sudah ditampilkan.")
