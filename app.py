@@ -1,9 +1,11 @@
 import streamlit as st
+import pandas as pd
 from data_loader import load_and_preprocess_data
 from recommender import compute_content_similarity, compute_collaborative_similarity, get_hybrid_recommendations
+from utils import find_show_by_keyword
 
 # ----------------------------------------------
-# Caching data dan similarity matrix
+# Caching
 # ----------------------------------------------
 @st.cache_data
 def load_data():
@@ -22,41 +24,35 @@ st.set_page_config(page_title="📺 TV Show Recommender", page_icon="📺", layo
 st.title("Sistem Rekomendasi TV Show (Hybrid)")
 st.caption("Item-Based CF + Content-Based (TF-IDF) | Weighted Hybrid")
 
-# Load data & similarity
-with st.spinner("Memuat dataset & membangun matriks kemiripan..."):
-    df = load_data()
-    cb_sim, cf_sim = compute_similarities(df)
+df = load_data()
+cb_sim, cf_sim = compute_similarities(df)
 
-# Deretan kontrol (tanpa sidebar)
-st.header("⚙️ Pengaturan")
+# ==================== Kontrol Pencarian & Pemilihan ====================
+col1, col2 = st.columns([1, 2])
+with col1:
+    keyword = st.text_input("Cari judul TV Show", "", placeholder="Ketik nama...")
 
-# Baris 1: Cari & Pilih TV Show
-col_search, col_select = st.columns([1, 2])
-with col_search:
-    keyword = st.text_input("Cari TV Show", "", placeholder="Ketik nama show...")
-with col_select:
-    all_shows = sorted(df["name"].tolist())
-    if keyword:
-        filtered_shows = [name for name in all_shows if keyword.lower() in name.lower()]
-    else:
-        filtered_shows = all_shows
+all_shows = sorted(df["name"].tolist())
+if keyword:
+    filtered_shows = [name for name in all_shows if keyword.lower() in name.lower()]
+else:
+    filtered_shows = all_shows
 
+with col2:
     if not filtered_shows:
         st.warning("Tidak ada show yang cocok.")
         selected_show = None
     else:
         selected_show = st.selectbox("Pilih TV Show:", filtered_shows)
 
-# Baris 2: Bobot & jumlah rekomendasi
-col_cf, col_slider, col_cb, col_num = st.columns([0.3, 3, 0.3, 1])
-with col_cf:
-    st.markdown("<span style='font-weight:bold; font-size:1.1rem;'>CF</span>",
-                unsafe_allow_html=True)
+# ==================== Bobot & Jumlah Rekomendasi ====================
+col_cf_label, col_slider, col_cb_label, col_num = st.columns([0.2, 2, 0.2, 1])
+with col_cf_label:
+    st.markdown("<span style='font-weight:bold;'>CF</span>", unsafe_allow_html=True)
 with col_slider:
     cf_pct = st.slider("Bobot CF (%)", 0, 100, 20, label_visibility="collapsed")
-with col_cb:
-    st.markdown("<span style='font-weight:bold; font-size:1.1rem;'>CB</span>",
-                unsafe_allow_html=True)
+with col_cb_label:
+    st.markdown("<span style='font-weight:bold;'>CB</span>", unsafe_allow_html=True)
 with col_num:
     top_n = st.number_input("Jumlah Rekomendasi", min_value=1, max_value=50, value=10)
 
@@ -65,7 +61,7 @@ cf_weight = cf_pct / 100.0
 cb_weight = cb_pct / 100.0
 st.caption(f"CF: **{cf_pct}%**  |  CB: **{cb_pct}%**")
 
-# Tombol generate
+# ==================== Tombol Generate ====================
 if st.button("🚀 Generate Rekomendasi", type="primary", use_container_width=True):
     if selected_show is None:
         st.warning("Silakan pilih TV Show terlebih dahulu.")
@@ -76,23 +72,59 @@ if st.button("🚀 Generate Rekomendasi", type="primary", use_container_width=Tr
         if error:
             st.error(error)
         else:
-            st.success(f"✅ Top {len(result)} rekomendasi untuk *{selected_show}*")
-            # Tampilkan setiap rekomendasi sebagai kartu
-            for _, row in result.iterrows():
-                with st.container():
-                    st.subheader(row["name"])
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("⭐ Rating", f"{row['vote_average']:.1f}")
-                    col2.metric("📊 Similarity Score", f"{row['similarity_score']:.3f}")
-                    col3.metric("🗳️ Vote Count", f"{row['vote_count']}")
+            # Hitung popularity untuk sorting
+            result = result.copy()
+            result["popularity"] = result["vote_average"] * result["vote_count"]
+            st.session_state["recommendations"] = result
+            st.session_state["show_name"] = selected_show
 
-                    # Overview asli (non‑regex)
-                    overview = row["overview_raw"]
-                    if len(overview) > 200:
-                        st.write(overview[:200] + "...")
-                        with st.expander("Selengkapnya"):
-                            st.write(overview)
-                    else:
-                        st.write(overview)
+# Tampilkan hasil jika ada
+if "recommendations" in st.session_state and st.session_state["recommendations"] is not None:
+    recs = st.session_state["recommendations"]
+    show_name = st.session_state.get("show_name", "")
 
-                    st.divider()
+    st.success(f"✅ Top {len(recs)} rekomendasi untuk *{show_name}*")
+
+    # --- Pilihan metrik pengurutan ---
+    sort_metric = st.radio(
+        "Urutkan berdasarkan:",
+        options=["Similarity Score", "Rating", "Popularity"],
+        horizontal=True,
+        index=0
+    )
+
+    # Sorting
+    if sort_metric == "Similarity Score":
+        recs_sorted = recs.sort_values("similarity_score", ascending=False)
+    elif sort_metric == "Rating":
+        recs_sorted = recs.sort_values("vote_average", ascending=False)
+    else:  # Popularity
+        recs_sorted = recs.sort_values("popularity", ascending=False)
+
+    # Tampilkan kartu
+    for _, row in recs_sorted.iterrows():
+        with st.container():
+            st.subheader(row["name"])
+            col1, col2, col3 = st.columns(3)
+            col1.metric("⭐ Rating", f"{row['vote_average']:.1f}")
+            col2.metric("📊 Similarity", f"{row['similarity_score']:.3f}")
+            col3.metric("🔥 Popularity", f"{row['popularity']:.0f}")
+            overview = row["overview_raw"]
+            if len(overview) > 200:
+                st.write(overview[:200] + "...")
+                with st.expander("Selengkapnya"):
+                    st.write(overview)
+            else:
+                st.write(overview)
+            st.divider()
+
+# ==================== Pencarian Kata Kunci (terpisah) ====================
+with st.expander("🔍 Pencarian Kata Kunci di Overview", expanded=False):
+    search_keyword = st.text_input("Masukkan kata kunci", placeholder="contoh: lawyer, space, family")
+    if search_keyword:
+        kw_results, kw_error = find_show_by_keyword(df, search_keyword)
+        if kw_error:
+            st.warning(kw_error)
+        else:
+            st.success(f"Ditemukan **{len(kw_results)}** show yang mengandung kata *'{search_keyword}'*")
+            st.dataframe(kw_results, use_container_width=True, hide_index=True)
