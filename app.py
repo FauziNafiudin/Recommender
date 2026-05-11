@@ -20,12 +20,22 @@ def compute_similarities(df):
 # ----------------------------------------------
 # Inisialisasi session state
 # ----------------------------------------------
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "rekomendasi"   # "rekomendasi" atau "keyword"
+
+# Untuk rekomendasi
 if "sort_metric" not in st.session_state:
-    st.session_state["sort_metric"] = "similarity"  # default
+    st.session_state["sort_metric"] = "similarity"
 if "recommendations" not in st.session_state:
     st.session_state["recommendations"] = None
 if "show_name" not in st.session_state:
     st.session_state["show_name"] = ""
+
+# Untuk pencarian keyword
+if "kw_results" not in st.session_state:
+    st.session_state["kw_results"] = None
+if "kw_page" not in st.session_state:
+    st.session_state["kw_page"] = 1
 
 # ----------------------------------------------
 # UI
@@ -37,11 +47,29 @@ st.caption("Item-Based CF + Content-Based (TF-IDF) | Weighted Hybrid")
 df = load_data()
 cb_sim, cf_sim = compute_similarities(df)
 
-# ==================== Tabs ====================
-tab_rekomendasi, tab_keyword = st.tabs(["🎯 Rekomendasi", "🔍 Pencarian Keyword"])
+# ==================== TAB SWITCHER (dua tombol sejajar) ====================
+col_tab1, col_tab2 = st.columns(2)
+with col_tab1:
+    if st.button(
+        "🎯 Rekomendasi",
+        use_container_width=True,
+        type="primary" if st.session_state.active_tab == "rekomendasi" else "secondary"
+    ):
+        st.session_state.active_tab = "rekomendasi"
+        st.rerun()
+with col_tab2:
+    if st.button(
+        "🔍 Pencarian Keyword",
+        use_container_width=True,
+        type="primary" if st.session_state.active_tab == "keyword" else "secondary"
+    ):
+        st.session_state.active_tab = "keyword"
+        st.rerun()
 
-# ==================== TAB REKOMENDASI ====================
-with tab_rekomendasi:
+st.divider()
+
+# ==================== KONTEN TAB REKOMENDASI ====================
+if st.session_state.active_tab == "rekomendasi":
     col1, col2 = st.columns([1, 2])
     with col1:
         keyword = st.text_input("Cari judul TV Show", "", placeholder="Ketik nama...")
@@ -74,7 +102,6 @@ with tab_rekomendasi:
     cb_weight = cb_pct / 100.0
     st.caption(f"CF: **{cf_pct}%**  |  CB: **{cb_pct}%**")
 
-    # Tombol Generate
     if st.button("🚀 Generate Rekomendasi", type="primary", use_container_width=True):
         if selected_show is None:
             st.warning("Silakan pilih TV Show terlebih dahulu.")
@@ -84,20 +111,20 @@ with tab_rekomendasi:
             )
             if error:
                 st.error(error)
-                st.session_state["recommendations"] = None
+                st.session_state.recommendations = None
             else:
                 result = result.copy()
                 result["popularity"] = result["vote_average"] * result["vote_count"]
-                st.session_state["recommendations"] = result
-                st.session_state["show_name"] = selected_show
+                st.session_state.recommendations = result
+                st.session_state.show_name = selected_show
 
-    # Tampilkan hasil jika ada
-    if st.session_state["recommendations"] is not None:
-        recs = st.session_state["recommendations"]
-        show_name = st.session_state["show_name"]
+    # Tampilkan hasil rekomendasi jika ada
+    if st.session_state.recommendations is not None:
+        recs = st.session_state.recommendations
+        show_name = st.session_state.show_name
         st.success(f"✅ Top {len(recs)} rekomendasi untuk *{show_name}*")
 
-        # ----- Tombol Pemilihan Metrik Pengurutan -----
+        # Tombol pengurutan
         st.write("**Urutkan berdasarkan:**")
         cols_btn = st.columns(3)
         metrics = [
@@ -106,14 +133,12 @@ with tab_rekomendasi:
             ("popularity", "Popularity")
         ]
         for col, (key, label) in zip(cols_btn, metrics):
-            # Tentukan type button: primary jika terpilih, secondary jika tidak
-            btn_type = "primary" if st.session_state["sort_metric"] == key else "secondary"
+            btn_type = "primary" if st.session_state.sort_metric == key else "secondary"
             if col.button(label, key=f"btn_{key}", use_container_width=True, type=btn_type):
-                st.session_state["sort_metric"] = key
-                st.rerun()  # agar perubahan langsung terlihat
+                st.session_state.sort_metric = key
+                st.rerun()
 
-        # Sorting
-        sort_key = st.session_state["sort_metric"]
+        sort_key = st.session_state.sort_metric
         if sort_key == "similarity":
             recs_sorted = recs.sort_values("similarity_score", ascending=False)
         elif sort_key == "rating":
@@ -121,7 +146,6 @@ with tab_rekomendasi:
         else:  # popularity
             recs_sorted = recs.sort_values("popularity", ascending=False)
 
-        # Tampilkan kartu
         for _, row in recs_sorted.iterrows():
             with st.container():
                 st.subheader(row["name"])
@@ -138,14 +162,69 @@ with tab_rekomendasi:
                     st.write(overview)
                 st.divider()
 
-# ==================== TAB PENCARIAN KEYWORD ====================
-with tab_keyword:
+# ==================== KONTEN TAB PENCARIAN KEYWORD ====================
+else:  # active_tab == "keyword"
     st.subheader("🔍 Pencarian Kata Kunci di Overview")
-    search_keyword = st.text_input("Masukkan kata kunci", placeholder="contoh: lawyer, space, family", key="search_kw")
-    if search_keyword:
-        kw_results, kw_error = find_show_by_keyword(df, search_keyword)
-        if kw_error:
-            st.warning(kw_error)
+    search_kw = st.text_input("Masukkan kata kunci", placeholder="contoh: lawyer, space, family", key="search_kw")
+    
+    if search_kw:
+        # Cari dan simpan hasil di session_state
+        results, error = find_show_by_keyword(df, search_kw)
+        if error:
+            st.warning(error)
+            st.session_state.kw_results = None
         else:
-            st.success(f"Ditemukan **{len(kw_results)}** show yang mengandung kata *'{search_keyword}'*")
-            st.dataframe(kw_results, use_container_width=True, hide_index=True)
+            # Tambahkan kolom popularity
+            results = results.copy()
+            results["popularity"] = results["vote_average"] * results["vote_count"]
+            st.session_state.kw_results = results
+            st.session_state.kw_page = 1   # reset halaman saat keyword baru
+
+    # Tampilkan hasil jika ada
+    if st.session_state.kw_results is not None:
+        data = st.session_state.kw_results
+        total = len(data)
+        per_page = 10
+        max_page = max(1, (total - 1) // per_page + 1)
+        page = st.session_state.kw_page
+
+        # Batasi halaman saat ini jika berubah
+        if page > max_page:
+            page = max_page
+            st.session_state.kw_page = page
+
+        start_idx = (page - 1) * per_page
+        end_idx = min(start_idx + per_page, total)
+        page_data = data.iloc[start_idx:end_idx]
+
+        st.success(f"Ditemukan **{total}** show yang mengandung kata *'{search_kw}'*")
+
+        # Tampilkan kartu
+        for _, row in page_data.iterrows():
+            with st.container():
+                st.subheader(row["name"])
+                col1, col2 = st.columns(2)
+                col1.metric("⭐ Rating", f"{row['vote_average']:.1f}")
+                col2.metric("🔥 Popularity", f"{row['popularity']:.0f}")
+                snippet = row["overview_snippet"]
+                st.write(snippet)
+                if len(row["overview_raw"]) > len(snippet.replace("...", "")):
+                    with st.expander("Selengkapnya"):
+                        st.write(row["overview_raw"])
+                st.divider()
+
+        # Paginasi
+        if max_page > 1:
+            col_prev, col_page, col_next = st.columns([1, 2, 1])
+            with col_prev:
+                if page > 1:
+                    if st.button("← Previous", use_container_width=True):
+                        st.session_state.kw_page = page - 1
+                        st.rerun()
+            with col_page:
+                st.markdown(f"<div style='text-align:center;'>Halaman {page} dari {max_page}</div>", unsafe_allow_html=True)
+            with col_next:
+                if page < max_page:
+                    if st.button("Next →", use_container_width=True):
+                        st.session_state.kw_page = page + 1
+                        st.rerun()
