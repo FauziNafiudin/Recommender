@@ -29,7 +29,7 @@ if "active_tab" not in st.session_state:
 
 # Rekomendasi
 if "sort_metric" not in st.session_state:
-    st.session_state.sort_metric = "similarity"
+    st.session_state.sort_metric = "similarity"   # default Similarity Score
 if "recommendations" not in st.session_state:
     st.session_state.recommendations = None
 if "show_name" not in st.session_state:
@@ -41,7 +41,7 @@ if "kw_results" not in st.session_state:
 if "kw_page" not in st.session_state:
     st.session_state.kw_page = 1
 if "kw_sort_metric" not in st.session_state:
-    st.session_state.kw_sort_metric = "rating"  # default Rating
+    st.session_state.kw_sort_metric = "rating"    # default Rating
 
 # ----------------------------------------------
 # UI
@@ -129,10 +129,11 @@ if st.session_state.active_tab == "rekomendasi":
         st.success(f"✅ Top {len(recs)} rekomendasi untuk *{show_name}*")
 
         st.write("**Urutkan berdasarkan:**")
+        # Urutan baru: Rating - Similarity - Popularity
         cols_btn = st.columns(3)
         metrics = [
-            ("similarity", "Similarity Score"),
             ("rating", "Rating"),
+            ("similarity", "Similarity Score"),
             ("popularity", "Popularity"),
         ]
         for col, (key, label) in zip(cols_btn, metrics):
@@ -146,7 +147,7 @@ if st.session_state.active_tab == "rekomendasi":
             recs_sorted = recs.sort_values("similarity_score", ascending=False)
         elif sort_key == "rating":
             recs_sorted = recs.sort_values("vote_average", ascending=False)
-        else:
+        else:  # popularity
             recs_sorted = recs.sort_values("popularity", ascending=False)
 
         for _, row in recs_sorted.iterrows():
@@ -182,17 +183,17 @@ else:
             results = results.copy()
             results["popularity"] = results["vote_average"] * results["vote_count"]
             st.session_state.kw_results = results
-            st.session_state.kw_page = 1  # reset halaman
+            st.session_state.kw_page = 1  # reset halaman saat pencarian baru
 
     # Tampilkan hasil jika ada
     if st.session_state.kw_results is not None:
         data = st.session_state.kw_results
         total = len(data)
 
-        # Sorting
+        # Sorting (dua tombol seimbang)
         st.write("**Urutkan berdasarkan:**")
-        col_rating, col_pop = st.columns([1, 4])
-        with col_rating:
+        c1, c2 = st.columns(2)
+        with c1:
             if st.button(
                 "Rating",
                 key="kw_sort_rating",
@@ -201,7 +202,7 @@ else:
             ):
                 st.session_state.kw_sort_metric = "rating"
                 st.rerun()
-        with col_pop:
+        with c2:
             if st.button(
                 "Popularity",
                 key="kw_sort_pop",
@@ -211,17 +212,17 @@ else:
                 st.session_state.kw_sort_metric = "popularity"
                 st.rerun()
 
+        # Terapkan sorting
         if st.session_state.kw_sort_metric == "rating":
             data = data.sort_values("vote_average", ascending=False)
         else:
             data = data.sort_values("popularity", ascending=False)
 
-        # Paginasi
         per_page = 10
         max_page = max(1, (total - 1) // per_page + 1)
         page = st.session_state.kw_page
 
-        # Batasi halaman jika di luar jangkauan
+        # Validasi halaman
         if page < 1:
             page = 1
             st.session_state.kw_page = 1
@@ -248,32 +249,39 @@ else:
                         st.write(row["overview_raw"])
                 st.divider()
 
-        # Navigasi halaman
+        # ---------------------------
+        # Navigasi halaman (berfungsi)
+        # ---------------------------
         if max_page > 1:
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col1:
+            col_prev, col_mid, col_next = st.columns([1, 2, 1])
+
+            with col_prev:
                 if page > 1:
                     if st.button("← Previous", use_container_width=True):
                         st.session_state.kw_page = page - 1
                         st.rerun()
-            with col2:
-                # Input manual halaman
-                new_page = st.number_input(
-                    "Halaman",
-                    min_value=1,
-                    max_value=max_page,
-                    value=page,
-                    step=1,
-                    label_visibility="collapsed",
-                )
-                if new_page != page:
-                    st.session_state.kw_page = new_page
-                    st.rerun()
+
+            with col_mid:
+                # Form untuk lompat halaman (tidak memicu rerun saat mengetik)
+                with st.form("jump_page_form", clear_on_submit=True):
+                    new_page = st.number_input(
+                        "Halaman",
+                        min_value=1,
+                        max_value=max_page,
+                        value=page,
+                        step=1,
+                    )
+                    submitted = st.form_submit_button("Go")
+                    if submitted:
+                        st.session_state.kw_page = int(new_page)
+                        st.rerun()
+
                 st.markdown(
                     f"<div style='text-align:center;'>dari {max_page}</div>",
                     unsafe_allow_html=True,
                 )
-            with col3:
+
+            with col_next:
                 if page < max_page:
                     if st.button("Next →", use_container_width=True):
                         st.session_state.kw_page = page + 1
